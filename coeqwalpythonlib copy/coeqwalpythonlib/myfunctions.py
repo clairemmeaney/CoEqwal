@@ -173,11 +173,22 @@ def exceedance_metric(df, var, exceedance_percent, vartitle, unit):
 
 """SPECIFIC FUNCTIONS"""
 
-# Annual Avg outflow of a Delta or Avg Resevoir Storage
-def ann_avg(df, dss_names, var_name):
+# Annual Avg (using dss_names)
+"""def ann_avg(df, dss_names, var_name):
     metrics = []
     for study_index in np.arange(0, len(dss_names)):
         metric_value = compute_mean(df, var_name, [study_index], "TAF", months=None)
+        metrics.append(metric_value)
+
+    ann_avg_delta_df = pd.DataFrame(metrics, columns=['Ann_Avg_' + var_name])
+    return ann_avg_delta_df"""
+
+# Annual Avg outflow of a Delta or Avg Resevoir Storage
+def ann_avg(df, study_list, var_name):
+    # lst_studies must be a list of integers (common name is dss_names)
+    metrics = []
+    for study in study_list:
+        metric_value = compute_mean(df, var_name, study, "TAF", months=None)
         metrics.append(metric_value)
 
     ann_avg_delta_df = pd.DataFrame(metrics, columns=['Ann_Avg_' + var_name])
@@ -187,8 +198,8 @@ def ann_avg(df, dss_names, var_name):
 def ann_pct(df, pct, var_name, study_list):
     return compute_iqr_value(df, pct, var_name, "TAF", study_list, np.arange(6), months=None, annual=True)
 
-# Monthly Avg Resevoir Storage or Avg Delta Outflow
-def mnth_avg(df, dss_names, var_name, mnth_num):
+# 1 Month Avg using dss_names
+"""def mnth_avg(df, dss_names, var_name, mnth_num):
     metrics = []
     for study_index in np.arange(0, len(dss_names)):
         metric_value = compute_mean(df, var_name, [study_index], "TAF", months=[mnth_num])
@@ -196,8 +207,56 @@ def mnth_avg(df, dss_names, var_name, mnth_num):
 
     mnth_str = calendar.month_abbr[mnth_num]
     mnth_avg_df = pd.DataFrame(metrics, columns=[mnth_str + '_Avg_' + var_name])
+    return mnth_avg_df"""
+
+# 1 Month Avg Resevoir Storage or Avg Delta Outflow
+def mnth_avg(df, study_list, var_name, mnth_num):
+    metrics = []
+    for study in study_list:
+        metric_value = compute_mean(df, var_name, study, "TAF", months=[mnth_num])
+        metrics.append(metric_value)
+
+    mnth_str = calendar.month_abbr[mnth_num]
+    mnth_avg_df = pd.DataFrame(metrics, columns=[mnth_str + '_Avg_' + var_name])
     return mnth_avg_df
+
+# All Months Avg Resevoir Storage or Avg Delta Outflow (based off plot_moy_averages)
+def moy_avgs(df):
+    """
+    The function assumes the DataFrame columns follow a specific naming
+    convention where the last part of the name indicates the study. 
+    """
+    df_copy = df.copy()
+    df_copy["Month"] = df.index.month
+    moy_df = df_copy.groupby('Month').mean()
+    return moy_df
 
 # Monthly X Percentile Resevoir Storage or X Percentile Delta Outflow
 def mnth_pct(df, pct, var_name, study_list, mnth_num):
     return compute_iqr_value(df, pct, var_name, "TAF", study_list, np.arange(6), months = [mnth_num], annual = True)
+
+# Annual Totals (based off plot_annual_totals)
+def annual_totals(df):
+    """
+    calculates annual totals for a given MultiIndex Dataframe that follows calsim conventions
+    
+    The function assumes the DataFrame columns follow a specific naming
+    convention where the last part of the name indicates the study. 
+    """
+    
+    annualized_df = pd.DataFrame()
+    var = '_'.join(df.columns[0][1].split('_')[:-1])
+    studies = [col[1].split('_')[-1] for col in df.columns]
+        
+    i=0
+    for study in studies:
+            study_cols = [col for col in df.columns if col[1].endswith(study)]
+            for col in study_cols:
+                with redirect_stdout(open(os.devnull, 'w')):
+                    temp_df = df.loc[:,[df.columns[i]]]
+                    temp_df["Year"] = df.index.year
+                    df_ann = temp_df.groupby("Year").sum()
+                    annualized_df = pd.concat([annualized_df, df_ann], axis=1)
+                    i+=1
+
+    return annualized_df 
