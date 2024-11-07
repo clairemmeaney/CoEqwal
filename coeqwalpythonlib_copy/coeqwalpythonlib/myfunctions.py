@@ -143,6 +143,7 @@ def calculate_flow_sum_per_year(flow_data):
 
     return flow_sum_per_year
 
+# keeping old exceedance_func keeping here for reference
 """def calculate_exceedance_probabilities(df):
     exceedance_df = pd.DataFrame(index=df.index)
 
@@ -231,7 +232,6 @@ def exceedance_metric(df, var, exceedance_percent, vartitle, unit):
 
 
 """SPECIFIC FUNCTIONS"""
-# ----------------------- ADD UNITS -----------------------------
 
 # Annual Avg (using dss_names)
 def ann_avg(df, dss_names, var_name, units):
@@ -286,58 +286,6 @@ def mnth_pct(df, dss_names, var_name, pct, units, df_title, mnth_num):
     study_list = np.arange(0, len(dss_names))
     return compute_iqr_value(df, pct, var_name, units, df_title, study_list, months = [mnth_num], annual = True)
 
-# Annual Totals (based off plot_annual_totals)
-# ---------------------FIX-------------------------------
-"""
-def annual_totals(df, var_name):
-    
-    #calculates annual totals for a given MultiIndex Dataframe that follows calsim conventions
-    #The function assumes the DataFrame columns follow a specific naming
-    #convention where the last part of the name indicates the study. 
-    
-    var_df = create_subset_var(df, varname=var_name)
-    annualized_df = pd.DataFrame()
-
-    studies = [col[1].split('_')[-1] for col in var_df.columns]
-        
-    i=0
-    for study in studies:
-        study_cols = [col for col in var_df.columns if col[1].endswith(study)]
-        for col in study_cols:
-            with redirect_stdout(open(os.devnull, 'w')):
-                temp_df = var_df.loc[:,[var_df.columns[i]]]
-                temp_df["Year"] = var_df.index.year
-                df_ann = temp_df.groupby("Year").sum()
-                annualized_df = pd.concat([annualized_df, df_ann], axis=1)
-                i+=1
-
-    return annualized_df
-
-def helper_annual_totals(df, dss_names, var_name, units="TAF", months=None):
-    subset_df = create_subset_unit(df, var_name, units)
-    if dss_names is not None:
-        subset_df = subset_df.iloc[:, dss_names]
-
-    subset_df = add_water_year_column(subset_df)
-
-    if months is not None:
-        subset_df = subset_df[subset_df.index.month.isin(months)]
-
-    annual_total = subset_df.groupby('WaterYear').sum()
-    return annual_total
-    
-def annual_totals(df, dss_names, var_name, units="TAF", months=None):
-    metrics = []
-
-    for study_index in np.arange(0, len(dss_names)):
-        metric_value = helper_annual_totals(df, var_name, [study_index], units, months=None)
-        metrics.append(metric_value)
-
-    ann_total_df = pd.DataFrame(metrics, columns=['Ann_Totals' + var_name])
-    return ann_total_df
-    """
-
-# like compute_annual_means
 def compute_annual_sums(df, var, study_lst, units, months):
     subset_df = create_subset_unit(df, var, units).iloc[:, study_lst]
     subset_df = add_water_year_column(subset_df)
@@ -354,28 +302,35 @@ def compute_sum(df, variable_list, study_lst, units, months = None):
     df = compute_annual_sums(df, variable_list, study_lst, units, months)
     return (df.sum()).iloc[-1]
 
-def moy_avgs(df, dss_names, var_name, units):
+def annual_totals(df, var_name, units):
     """
+    Plots a time-series graph of annual totals for a given MultiIndex Dataframe that 
+    follows calsim conventions
+    
     The function assumes the DataFrame columns follow a specific naming
     convention where the last part of the name indicates the study. 
     """
-    var_df = create_subset_var(df, varname=var_name)
+    df = create_subset_unit(df, var_name, units)
     
-    all_months_avg = {}
-    for mnth_num in range(1, 13):
-        metrics = []
-
-        for study_index in np.arange(0, len(dss_names)):
-            metric_val = compute_mean(var_df, var_name, [study_index], units, months=[mnth_num])
-            metrics.append(metric_val)
-
-        mnth_str = calendar.month_abbr[mnth_num]
-        all_months_avg[mnth_str] = np.mean(metrics)
+    annualized_df = pd.DataFrame()
+    var = '_'.join(df.columns[0][1].split('_')[:-1])
+    studies = [col[1].split('_')[-1] for col in df.columns]
+        
+    colormap = plt.cm.tab20
+    colors = [colormap(i) for i in range(df.shape[1])]
+    colors[-1] = [0,0,0,1]
+        
+    i=0
     
-    moy_df = pd.DataFrame(list(all_months_avg.items()), columns=['Month', f'Avg_{var_name}'])
-    return moy_df
-
-def annual_totals(df, dss_names, var_name, units="TAF", months=None):
-    return 
-
+    for study in studies:
+        study_cols = [col for col in df.columns if col[1].endswith(study)]
+        for col in study_cols:
+            with redirect_stdout(open(os.devnull, 'w')):
+                temp_df = df.loc[:,[df.columns[i]]]
+                temp_df["Year"] = df.index.year
+                df_ann = temp_df.groupby("Year").sum()
+                annualized_df = pd.concat([annualized_df, df_ann], axis=1)
+                i+=1
+                    
+    return annualized_df 
     
