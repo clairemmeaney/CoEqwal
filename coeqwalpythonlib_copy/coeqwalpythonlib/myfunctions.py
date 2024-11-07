@@ -8,6 +8,8 @@ from pathlib import Path
 from contextlib import redirect_stdout
 import calendar
 
+#import csPlots.py as csPlots
+
 # Import data manipulation libraries
 import numpy as np
 import pandas as pd
@@ -73,13 +75,18 @@ def compute_annual_means(df, var, study_lst = None, units = "TAF", months = None
     if months is not None:
         subset_df = subset_df[subset_df.index.month.isin(months)]
         
-    annual_sum = subset_df.groupby('WaterYear').sum()
+    annual_sum = subset_df.groupby('WaterYear').mean()
     return annual_sum
+
+"""def compute_mean(df, variable_list, study_lst, units, months = None):
+    df = compute_annual_sums(df, variable_list, study_lst, units, months)
+    num_years = len(df)
+    return (df.sum() / num_years).iloc[-1]"""
 
 def compute_mean(df, variable_list, study_lst, units, months = None):
     df = compute_annual_means(df, variable_list, study_lst, units, months)
-    num_years = len(df)
-    return (df.sum() / num_years).iloc[-1]
+    num_nonnull_yrs = df.dropna().shape[0]
+    return (df.sum() / num_nonnull_yrs).iloc[-1]
 
 def compute_sd(df, variable_list, units, varname, months = None):
     subset_df = create_subset_unit(df, variable_list, units)
@@ -91,7 +98,7 @@ def compute_sd(df, variable_list, units, varname, months = None):
 
 def compute_iqr_value(df, iqr_value, variable, units, varname, study_list, months=None, annual=True):
     if annual:
-        subset_df = compute_annual_means(create_subset_unit(df, variable, units), variable, study_list, units, months)
+        subset_df = compute_annual_sums(create_subset_unit(df, variable, units), variable, study_list, units, months)
     else:
         subset_df = create_subset_unit(df, variable, units)
         if months is not None:
@@ -136,7 +143,7 @@ def calculate_flow_sum_per_year(flow_data):
 
     return flow_sum_per_year
 
-def calculate_exceedance_probabilities(df):
+"""def calculate_exceedance_probabilities(df):
     exceedance_df = pd.DataFrame(index=df.index)
 
     for column in df.columns:
@@ -144,15 +151,35 @@ def calculate_exceedance_probabilities(df):
         exceedance_probs = (sorted_values.rank(method='first', ascending=False)) / (1 + len(sorted_values))
         exceedance_df[column] = exceedance_probs.sort_index()
 
+    return exceedance_df"""
+
+def calculate_exceedance_probabilities(df):
+    exceedance_df = pd.DataFrame(index=df.index)
+    for column in df.columns:
+        sorted_values = df[column].dropna().sort_values(ascending=False)
+        exceedance_probs = sorted_values.rank(method='first', ascending=False) / (1 + len(sorted_values))
+        exceedance_df[column] = exceedance_probs.reindex(df.index)
     return exceedance_df
 
-def exceedance_probability(df, var, threshold, month, vartitle):
+"""def exceedance_probability(df, var, threshold, month, vartitle):
     var_df = create_subset_var(df, var)
     var_month_df = var_df[var_df.index.month.isin([month])]
     result_df = count_exceedance_days(var_month_df, threshold) / len(var_month_df) * 100
     reshaped_df = result_df.melt(value_name=vartitle).reset_index(drop=True)[[vartitle]]
+    return reshaped_df"""
+
+def exceedance_probability(df, var, threshold, month, vartitle):
+    # Subset data for the specific variable
+    var_df = create_subset_var(df, var)
+    # Filter by the specified month and drop NaNs --> only valid values are used in calculating the exceedance probability
+    var_month_df = var_df[var_df.index.month.isin([month])].dropna()
+    # Count how often the values exceed the threshold and calculate the percentage
+    result_df = count_exceedance_days(var_month_df, threshold) / len(var_month_df) * 100
+    # Reshape the result to match the expected output format
+    reshaped_df = result_df.melt(value_name=vartitle).reset_index(drop=True)[[vartitle]]
     return reshaped_df
 
+"""
 def exceedance_metric(df, var, exceedance_percent, vartitle, unit):
     var_df = create_subset_unit(df, var, unit)
     annual_flows = calculate_flow_sum_per_year(var_df).iloc[:, 1:]
@@ -168,73 +195,72 @@ def exceedance_metric(df, var, exceedance_percent, vartitle, unit):
     result_df = count_exceedance_days(annual_flows, baseline_threshold) / len(annual_flows) * 100
     reshaped_df = result_df.melt(value_name=vartitle).reset_index(drop=True)[[vartitle]]
 
+    return reshaped_df"""
+
+def exceedance_metric(df, var, exceedance_percent, vartitle, unit):
+    # Extract data for a specific variable in the desired units
+    var_df = create_subset_unit(df, var, unit)
+    # Drop NaNs and calculate annual flow sums
+    annual_flows = calculate_flow_sum_per_year(var_df).iloc[:, 1:].dropna()
+    # Calculate exceedance probabilities for valid data only
+    exceedance_probs = calculate_exceedance_probabilities(annual_flows)
+    # Sort annual flows and exceedance probabilities for thresholding
+    annual_flows_sorted = annual_flows.apply(np.sort, axis=0)[::-1]
+    """exceedance_prob_baseline = exceedance_probs.apply(np.sort, axis=0).iloc[:, 0].to_frame()
+    exceedance_prob_baseline.columns = [“Exceedance Sorted”]"""
+    exceedance_prob_baseline = exceedance_probs.apply(np.sort, axis=0)
+    if not exceedance_prob_baseline.empty:
+        exceedance_prob_baseline = exceedance_prob_baseline.iloc[:, 0].to_frame()
+        exceedance_prob_baseline.columns = ["Exceedance Sorted"]
+    else:
+        raise ValueError("No data available for exceedance probability calculation")
+    # Find the index where exceedance probability meets or exceeds the given percentage
+    #exceeding_index = exceedance_prob_baseline[exceedance_prob_baseline[‘Exceedance Sorted’] >= exceedance_percent].index[0]
+    if 'Exceedance Sorted' not in exceedance_prob_baseline.columns:
+        raise KeyError("Column 'Exceedance Sorted' not found in DataFrame")
+    filtered_indices = exceedance_prob_baseline.loc[exceedance_prob_baseline['Exceedance Sorted'] >= exceedance_percent].index
+    if len(filtered_indices) == 0:
+        raise ValueError("No values found meeting the exceedance criteria")
+    exceeding_index = filtered_indices[0]
+    baseline_threshold = annual_flows_sorted.iloc[len(annual_flows_sorted) - exceeding_index - 1, 0]
+    # Count exceedance days, ignoring NaNs
+    result_df = count_exceedance_days(annual_flows, baseline_threshold).dropna() / len(annual_flows) * 100
+    # Reshape the result for output format
+    reshaped_df = result_df.melt(value_name=vartitle).reset_index(drop=True)[[vartitle]]
     return reshaped_df
 
 
 """SPECIFIC FUNCTIONS"""
+# ----------------------- ADD UNITS -----------------------------
 
 # Annual Avg (using dss_names)
-def ann_avg(df, dss_names, var_name):
+def ann_avg(df, dss_names, var_name, units):
     metrics = []
     for study_index in np.arange(0, len(dss_names)):
-        metric_value = compute_mean(df, var_name, [study_index], "TAF", months=None)
+        metric_value = compute_mean(df, var_name, [study_index], units, months=None)
         metrics.append(metric_value)
 
     ann_avg_delta_df = pd.DataFrame(metrics, columns=['Ann_Avg_' + var_name])
     return ann_avg_delta_df
 
-# Annual Avg outflow of a Delta or Avg Resevoir Storage
-"""def ann_avg(df, study_list, var_name):
-    # lst_studies must be a list of integers (common name is dss_names)
-    metrics = []
-    for study in study_list:
-        metric_value = compute_mean(df, var_name, study, "TAF", months=None)
-        metrics.append(metric_value)
-
-    ann_avg_delta_df = pd.DataFrame(metrics, columns=['Ann_Avg_' + var_name])
-    return ann_avg_delta_df"""
-
 # Annual X Percentile outflow of a Delta or X Percentile Resevoir Storage
-def ann_pct(df, dss_names, pct, var_name, df_title):
+def ann_pct(df, dss_names, pct, var_name, units, df_title):
     study_list = np.arange(0, len(dss_names))
-    return compute_iqr_value(df, pct, var_name, "TAF", df_title, study_list, months=None, annual=True)
+    return compute_iqr_value(df, pct, var_name, units, df_title, study_list, months=None, annual=True)
 
 # 1 Month Avg using dss_names
-def mnth_avg(df, dss_names, var_name, mnth_num):
+def mnth_avg(df, dss_names, var_name, units, mnth_num):
     metrics = []
     for study_index in np.arange(0, len(dss_names)):
-        metric_value = compute_mean(df, var_name, [study_index], "TAF", months=[mnth_num])
+        metric_value = compute_mean(df, var_name, [study_index], units, months=[mnth_num])
         metrics.append(metric_value)
 
     mnth_str = calendar.month_abbr[mnth_num]
     mnth_avg_df = pd.DataFrame(metrics, columns=[mnth_str + '_Avg_' + var_name])
     return mnth_avg_df
 
-# 1 Month Avg Resevoir Storage or Avg Delta Outflow
-"""def mnth_avg(df, study_list, var_name, mnth_num):
-    metrics = []
-    for study in study_list:
-        metric_value = compute_mean(df, var_name, study, "TAF", months=[mnth_num])
-        metrics.append(metric_value)
-
-    mnth_str = calendar.month_abbr[mnth_num]
-    mnth_avg_df = pd.DataFrame(metrics, columns=[mnth_str + '_Avg_' + var_name])
-    return mnth_avg_df"""
-
 # All Months Avg Resevoir Storage or Avg Delta Outflow (based off plot_moy_averages)
-# WRONG
-"""def moy_avgs(df, var_name):
-    "
-    The function assumes the DataFrame columns follow a specific naming
-    convention where the last part of the name indicates the study. 
-    "
-    var_df = create_subset_var(df, varname=var_name)
-    df_copy = var_df.copy()
-    df_copy["Month"] = df.index.month
-    moy_df = df_copy.groupby('Month').mean()
-    return moy_df"""
-
-def moy_avgs(df, var_name, dss_names):
+def moy_avgs(df, dss_names, var_name, units):
     """
     The function assumes the DataFrame columns follow a specific naming
     convention where the last part of the name indicates the study. 
@@ -246,7 +272,7 @@ def moy_avgs(df, var_name, dss_names):
         metrics = []
 
         for study_index in np.arange(0, len(dss_names)):
-            metric_val = compute_mean(var_df, var_name, [study_index], "TAF", months=[mnth_num])
+            metric_val = compute_mean(var_df, var_name, [study_index], units, months=[mnth_num])
             metrics.append(metric_val)
 
         mnth_str = calendar.month_abbr[mnth_num]
@@ -256,33 +282,100 @@ def moy_avgs(df, var_name, dss_names):
     return moy_df
 
 # Monthly X Percentile Resevoir Storage or X Percentile Delta Outflow
-def mnth_pct(df, dss_names, pct, var_name, df_title, mnth_num):
+def mnth_pct(df, dss_names, var_name, pct, units, df_title, mnth_num):
     study_list = np.arange(0, len(dss_names))
-    return compute_iqr_value(df, pct, var_name, "TAF", df_title, study_list, months = [mnth_num], annual = True)
+    return compute_iqr_value(df, pct, var_name, units, df_title, study_list, months = [mnth_num], annual = True)
 
 # Annual Totals (based off plot_annual_totals)
 # ---------------------FIX-------------------------------
+"""
 def annual_totals(df, var_name):
-    """
-    calculates annual totals for a given MultiIndex Dataframe that follows calsim conventions
     
+    #calculates annual totals for a given MultiIndex Dataframe that follows calsim conventions
+    #The function assumes the DataFrame columns follow a specific naming
+    #convention where the last part of the name indicates the study. 
+    
+    var_df = create_subset_var(df, varname=var_name)
+    annualized_df = pd.DataFrame()
+
+    studies = [col[1].split('_')[-1] for col in var_df.columns]
+        
+    i=0
+    for study in studies:
+        study_cols = [col for col in var_df.columns if col[1].endswith(study)]
+        for col in study_cols:
+            with redirect_stdout(open(os.devnull, 'w')):
+                temp_df = var_df.loc[:,[var_df.columns[i]]]
+                temp_df["Year"] = var_df.index.year
+                df_ann = temp_df.groupby("Year").sum()
+                annualized_df = pd.concat([annualized_df, df_ann], axis=1)
+                i+=1
+
+    return annualized_df
+
+def helper_annual_totals(df, dss_names, var_name, units="TAF", months=None):
+    subset_df = create_subset_unit(df, var_name, units)
+    if dss_names is not None:
+        subset_df = subset_df.iloc[:, dss_names]
+
+    subset_df = add_water_year_column(subset_df)
+
+    if months is not None:
+        subset_df = subset_df[subset_df.index.month.isin(months)]
+
+    annual_total = subset_df.groupby('WaterYear').sum()
+    return annual_total
+    
+def annual_totals(df, dss_names, var_name, units="TAF", months=None):
+    metrics = []
+
+    for study_index in np.arange(0, len(dss_names)):
+        metric_value = helper_annual_totals(df, var_name, [study_index], units, months=None)
+        metrics.append(metric_value)
+
+    ann_total_df = pd.DataFrame(metrics, columns=['Ann_Totals' + var_name])
+    return ann_total_df
+    """
+
+# like compute_annual_means
+def compute_annual_sums(df, var, study_lst, units, months):
+    subset_df = create_subset_unit(df, var, units).iloc[:, study_lst]
+    subset_df = add_water_year_column(subset_df)
+    
+    if months is not None:
+        subset_df = subset_df[subset_df.index.month.isin(months)]
+        
+    annual_sum = subset_df.groupby('WaterYear').sum()
+
+    return annual_sum
+
+# compute sum
+def compute_sum(df, variable_list, study_lst, units, months = None):
+    df = compute_annual_sums(df, variable_list, study_lst, units, months)
+    return (df.sum()).iloc[-1]
+
+def moy_avgs(df, dss_names, var_name, units):
+    """
     The function assumes the DataFrame columns follow a specific naming
     convention where the last part of the name indicates the study. 
     """
     var_df = create_subset_var(df, varname=var_name)
+    
+    all_months_avg = {}
+    for mnth_num in range(1, 13):
+        metrics = []
 
-    annualized_df = pd.DataFrame()
-    studies = [col[1].split('_')[-1] for col in df.columns]
-        
-    i=0
-    for study in studies:
-            study_cols = [col for col in var_df.columns if col[1].endswith(study)]
-            for col in study_cols:
-                with redirect_stdout(open(os.devnull, 'w')):
-                    temp_df = var_df.loc[:,[df.columns[i]]]
-                    temp_df["Year"] = var_df.index.year
-                    df_ann = temp_df.groupby("Year").sum()
-                    annualized_df = pd.concat([annualized_df, df_ann], axis=1)
-                    i+=1
+        for study_index in np.arange(0, len(dss_names)):
+            metric_val = compute_mean(var_df, var_name, [study_index], units, months=[mnth_num])
+            metrics.append(metric_val)
 
-    return annualized_df 
+        mnth_str = calendar.month_abbr[mnth_num]
+        all_months_avg[mnth_str] = np.mean(metrics)
+    
+    moy_df = pd.DataFrame(list(all_months_avg.items()), columns=['Month', f'Avg_{var_name}'])
+    return moy_df
+
+def annual_totals(df, dss_names, var_name, units="TAF", months=None):
+    return 
+
+    

@@ -1,8 +1,0 @@
-README.md
-setup.py
-coeqwalpythonlib/__init__.py
-coeqwalpythonlib/myfunctions.py
-coeqwalpythonlib.egg-info/PKG-INFO
-coeqwalpythonlib.egg-info/SOURCES.txt
-coeqwalpythonlib.egg-info/dependency_links.txt
-coeqwalpythonlib.egg-info/top_level.txt
